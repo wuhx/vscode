@@ -1,0 +1,60 @@
+name: Build Custom VS Code (macOS)
+
+on: 
+  workflow_dispatch: 
+
+jobs:
+  build:
+    runs-on: macos-latest 
+    steps:
+      - name: Checkout VS Code source
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vscode
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'yarn'
+
+      - name: Inject macOS Native Notification
+        run: |
+          node -e "
+          const fs = require('fs');
+          const file = 'src/vs/workbench/services/notification/common/notificationService.ts';
+          let code = fs.readFileSync(file, 'utf8');
+          
+          const target = 'public notify(notification: INotification): INotificationHandle {';
+          
+          const injection = \`
+          public notify(notification: INotification): INotificationHandle {
+              if (typeof notification.message === 'string' && (notification.message.includes('wants to run') || notification.message.includes('Permission request'))) {
+                  new Notification('VS Code', { 
+                      body: notification.message 
+                  });
+              }
+          \`;
+          
+          code = code.replace(target, injection);
+          fs.writeFileSync(file, code);
+          console.log('macOS notification logic successfully!');
+          "
+
+      - name: Yarn Install
+        env:
+          NODE_OPTIONS: "--max_old_space_size=4096"
+        run: yarn install
+
+      - name: Compile and Package
+        env:
+          NODE_OPTIONS: "--max_old_space_size=4096"
+        run: yarn gulp vscode-darwin-arm64-min
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-vscode-macos-arm64
+          path: ../VSCode-darwin-arm64/  
+          retention-days: 3

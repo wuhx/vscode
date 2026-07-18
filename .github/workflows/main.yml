@@ -11,7 +11,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: microsoft/vscode
-          ref: main
+          ref: '1.129.1'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -19,27 +19,54 @@ jobs:
           node-version-file: '.nvmrc'
           cache: 'npm'
 
+      - name: Disable Telemetry
+        run: |
+          node -e "
+          const fs = require('fs');
+          const file = 'product.json';
+          if (fs.existsSync(file)) {
+              let product = JSON.parse(fs.readFileSync(file, 'utf8'));
+              product.enableTelemetry = false;
+              delete product.telemetryOptInUrl;
+              delete product.aiConfig;
+              fs.writeFileSync(file, JSON.stringify(product, null, 2));
+              console.log('Telemetry completely disabled.');
+          }
+          "
+
       - name: Inject macOS Native Notification
         run: |
           node -e "
           const fs = require('fs');
           const file = 'src/vs/workbench/services/notification/common/notificationService.ts';
-          let code = fs.readFileSync(file, 'utf8');
-          
-          const target = 'public notify(notification: INotification): INotificationHandle {';
-          
-          const injection = \`
-          public notify(notification: INotification): INotificationHandle {
-              if (typeof notification.message === 'string' && (notification.message.includes('wants to run') || notification.message.includes('Permission request'))) {
-                  new Notification('VS Code', { 
-                      body: notification.message 
-                  });
-              }
-          \`;
-          
-          code = code.replace(target, injection);
-          fs.writeFileSync(file, code);
-          console.log('macOS notification logic successfully!');
+          if (fs.existsSync(file)) {
+              let code = fs.readFileSync(file, 'utf8');
+              const target = 'public notify(notification: INotification): INotificationHandle {';
+              const injection = \`
+              public notify(notification: INotification): INotificationHandle {
+                  if (typeof notification.message === 'string' && (notification.message.includes('wants to run') || notification.message.includes('Permission request'))) {
+                      new Notification('VS Code', { 
+                          body: notification.message 
+                      });
+                  }
+              \`;
+              code = code.replace(target, injection);
+              fs.writeFileSync(file, code);
+              console.log('macOS notification logic injected successfully!');
+          }
+          "
+
+      - name: Bypass Copilot SDK Check
+        run: |
+          node -e "
+          const fs = require('fs');
+          const file = 'build/lib/copilot.ts';
+          if (fs.existsSync(file)) {
+              let code = fs.readFileSync(file, 'utf8');
+              code = code.replace(/export async function prepareBuiltInCopilotRipgrepShim[^{]*\{/, 'export async function prepareBuiltInCopilotRipgrepShim() { return;');
+              fs.writeFileSync(file, code);
+              console.log('Bypassed Copilot build step successfully!');
+          }
           "
 
       - name: NPM Install
@@ -52,12 +79,21 @@ jobs:
           NODE_OPTIONS: "--max_old_space_size=4096"
         run: npm run gulp vscode-darwin-arm64-min
 
-      - name: Strip Debug Symbols and Source Maps
+      - name: Strip and Deep Clean Artifact
         run: |
           find ../VSCode-darwin-arm64 -name "*.map" -type f -delete
           find ../VSCode-darwin-arm64 -name "*.dSYM" -type d -exec rm -rf {} +
           find ../VSCode-darwin-arm64 -name "*.md" -type f -delete
           find ../VSCode-darwin-arm64 -name "*.d.ts" -type f -delete
+          find ../VSCode-darwin-arm64 -name "test" -type d -prune -exec rm -rf {} +
+          find ../VSCode-darwin-arm64 -name "tests" -type d -prune -exec rm -rf {} +
+          find ../VSCode-darwin-arm64 -name "*.test.js" -type f -delete
+          find ../VSCode-darwin-arm64 -name "*.spec.js" -type f -delete
+          find ../VSCode-darwin-arm64 -name "*.c" -type f -delete
+          find ../VSCode-darwin-arm64 -name "*.cpp" -type f -delete
+          find ../VSCode-darwin-arm64 -name "*.h" -type f -delete
+          find ../VSCode-darwin-arm64 -name ".npmignore" -type f -delete
+          find ../VSCode-darwin-arm64 -name ".eslintrc*" -type f -delete
           find ../VSCode-darwin-arm64 -name "*.node" -type f -exec strip -x {} + || true
 
       - name: Move Artifact into Workspace

@@ -17,7 +17,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'yarn'
+          cache: 'npm'
 
       - name: Inject macOS Native Notification
         run: |
@@ -42,15 +42,15 @@ jobs:
           console.log('macOS notification logic successfully!');
           "
 
-      - name: Yarn Install
+      - name: NPM Install
         env:
           NODE_OPTIONS: "--max_old_space_size=4096"
-        run: yarn install
+        run: npm ci
 
       - name: Compile and Package
         env:
           NODE_OPTIONS: "--max_old_space_size=4096"
-        run: yarn gulp vscode-darwin-arm64-min
+        run: npm run gulp vscode-darwin-arm64-min
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4

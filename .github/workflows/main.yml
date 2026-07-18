@@ -16,7 +16,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          # 直接读取 VS Code 源码中的 .nvmrc 文件，自动匹配所需的 Node 版本
+          node-version-file: '.nvmrc'
           cache: 'npm'
 
       - name: Inject macOS Native Notification

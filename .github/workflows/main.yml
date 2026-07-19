@@ -101,9 +101,9 @@ jobs:
           const file = 'build/lib/copilot.ts';
           if (!fs.existsSync(file)) { throw new Error(file + ' not found'); }
           let code = fs.readFileSync(file, 'utf8');
-          const target = /export async function prepareBuiltInCopilotRipgrepShim[^{]*\{/;
+          const target = /export (async )?function prepareBuiltInCopilotRipgrepShim\([^)]*\)[^{]*\{/;
           if (!target.test(code)) { throw new Error('prepareBuiltInCopilotRipgrepShim signature not found - VS Code source may have changed'); }
-          code = code.replace(target, 'export async function prepareBuiltInCopilotRipgrepShim() { return;');
+          code = code.replace(target, 'export function prepareBuiltInCopilotRipgrepShim(...args) { return;');
           fs.writeFileSync(file, code);
           console.log('Bypassed Copilot build step successfully!');
           "

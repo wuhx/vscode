@@ -99,6 +99,7 @@ jobs:
           NODE_OPTIONS: "--max_old_space_size=4096"
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm ci
 
       - name: Compile and Package

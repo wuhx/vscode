@@ -1,37 +1,72 @@
 name: Build Custom VS Code (macOS)
 
-on: 
-  workflow_dispatch: 
+on:
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-latest 
+    runs-on: macos-15
+    timeout-minutes: 120
     steps:
       - name: Checkout VS Code source
         uses: actions/checkout@v4
         with:
           repository: microsoft/vscode
-          ref: '1.129.1'
+          ref: "1.129.1"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version-file: '.nvmrc'
-          cache: 'npm'
+          node-version-file: ".nvmrc"
+          cache: "npm"
 
-      - name: Disable Telemetry
+      - name: Modify product.json (Telemetry, Branding, Gallery, and Backend Endpoints)
         run: |
           node -e "
           const fs = require('fs');
           const file = 'product.json';
-          if (fs.existsSync(file)) {
-              let product = JSON.parse(fs.readFileSync(file, 'utf8'));
-              product.enableTelemetry = false;
-              delete product.telemetryOptInUrl;
-              delete product.aiConfig;
-              fs.writeFileSync(file, JSON.stringify(product, null, 2));
-              console.log('Telemetry completely disabled.');
-          }
+          if (!fs.existsSync(file)) { throw new Error(file + ' not found'); }
+          let product = JSON.parse(fs.readFileSync(file, 'utf8'));
+
+          // Disable Telemetry
+          product.enableTelemetry = false;
+          delete product.telemetryOptInUrl;
+          delete product.aiConfig;
+
+          // Remove backend endpoints not covered by the telemetry flag
+          delete product.voiceWsUrl;
+          delete product.builtInExtensionsEnabledWithAutoUpdates;
+          delete product.updateUrl;
+
+          // Inject Custom Branding and Official Extensions Gallery
+          product.nameShort = 'Code';
+          product.nameLong = 'Visual Studio Code';
+          product.applicationName = 'code';
+          product.dataFolderName = '.vscode';
+          product.win32MutexName = 'vscode';
+          product.licenseUrl = 'https://go.microsoft.com/fwlink/?LinkID=533484';
+          product.extensionsGallery = {
+              serviceUrl: 'https://marketplace.visualstudio.com/_apis/public/gallery',
+              cacheUrl: 'https://vscode.blob.core.windows.net/gallery/index',
+              itemUrl: 'https://marketplace.visualstudio.com/items'
+          };
+
+          fs.writeFileSync(file, JSON.stringify(product, null, 2));
+          console.log('product.json successfully modified.');
+          "
+
+      - name: Disable AI/Copilot Features by Default
+        run: |
+          node -e "
+          const fs = require('fs');
+          const file = 'src/vs/workbench/contrib/chat/browser/chat.shared.contribution.ts';
+          if (!fs.existsSync(file)) { throw new Error(file + ' not found'); }
+          let code = fs.readFileSync(file, 'utf8');
+          const target = /(\[ChatConfiguration\.AIDisabled\]:\s*{[^}]*default:\s*)false/;
+          if (!target.test(code)) { throw new Error('AIDisabled config block not found - VS Code source may have changed'); }
+          code = code.replace(target, '\$1true');
+          fs.writeFileSync(file, code);
+          console.log('chat.disableAIFeatures default flipped to true successfully!');
           "
 
       - name: Inject macOS Native Notification
@@ -39,49 +74,34 @@ jobs:
           node -e "
           const fs = require('fs');
           const file = 'src/vs/workbench/services/notification/common/notificationService.ts';
-          if (fs.existsSync(file)) {
-              let code = fs.readFileSync(file, 'utf8');
-              const target = 'public notify(notification: INotification): INotificationHandle {';
-              const injection = \`
-              public notify(notification: INotification): INotificationHandle {
-                  if (typeof notification.message === 'string' && (notification.message.includes('wants to run') || notification.message.includes('Permission request'))) {
-                      new Notification('VS Code', { 
-                          body: notification.message 
-                      });
-                  }
-              \`;
-              code = code.replace(target, injection);
-              fs.writeFileSync(file, code);
-              console.log('macOS notification logic injected successfully!');
-          }
-          "
-
-      - name: Bypass Copilot SDK Check
-        run: |
-          node -e "
-          const fs = require('fs');
-          const file = 'build/lib/copilot.ts';
-          if (fs.existsSync(file)) {
-              let code = fs.readFileSync(file, 'utf8');
-              code = code.replace(/export async function prepareBuiltInCopilotRipgrepShim[^{]*\{/, 'export async function prepareBuiltInCopilotRipgrepShim() { return;');
-              fs.writeFileSync(file, code);
-              console.log('Bypassed Copilot build step successfully!');
-          }
+          if (!fs.existsSync(file)) { throw new Error(file + ' not found'); }
+          let code = fs.readFileSync(file, 'utf8');
+          const target = 'notify(notification: INotification): INotificationHandle {';
+          if (!code.includes(target)) { throw new Error('notify() signature not found - VS Code source may have changed'); }
+          const injection = \`notify(notification: INotification): INotificationHandle {
+              if (typeof notification.message === 'string' && (notification.message.includes('wants to run') || notification.message.includes('Permission request'))) {
+                  new Notification('VS Code', {
+                      body: notification.message
+                  });
+              }
+          \`;
+          code = code.replace(target, injection);
+          fs.writeFileSync(file, code);
+          console.log('macOS notification logic injected successfully!');
           "
 
       - name: NPM Install
         env:
           NODE_OPTIONS: "--max_old_space_size=4096"
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: npm ci
 
       - name: Compile and Package
-        env:
-          NODE_OPTIONS: "--max_old_space_size=4096"
         run: npm run gulp vscode-darwin-arm64-min
 
       - name: Strip and Deep Clean Artifact
         run: |
-          find ../VSCode-darwin-arm64 -name "*.map" -type f -delete
           find ../VSCode-darwin-arm64 -name "*.dSYM" -type d -exec rm -rf {} +
           find ../VSCode-darwin-arm64 -name "*.md" -type f -delete
           find ../VSCode-darwin-arm64 -name "*.d.ts" -type f -delete
@@ -96,12 +116,18 @@ jobs:
           find ../VSCode-darwin-arm64 -name ".eslintrc*" -type f -delete
           find ../VSCode-darwin-arm64 -name "*.node" -type f -exec strip -x {} + || true
 
-      - name: Move Artifact into Workspace
-        run: mv ../VSCode-darwin-arm64 ./VSCode-darwin-arm64-artifact
+      - name: Re-sign Application Bundle
+        run: |
+          codesign --force --deep --sign - "../VSCode-darwin-arm64/Visual Studio Code.app"
+
+      - name: Move and Zip Artifact
+        run: |
+          mv ../VSCode-darwin-arm64 ./VSCode-darwin-arm64-artifact
+          ditto -c -k --sequesterRsrc --keepParent "VSCode-darwin-arm64-artifact/Visual Studio Code.app" VSCode-darwin-arm64.zip
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: custom-vscode-macos-arm64
-          path: VSCode-darwin-arm64-artifact/
+          path: VSCode-darwin-arm64.zip
           retention-days: 3

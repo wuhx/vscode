@@ -94,6 +94,20 @@ jobs:
           console.log('macOS notification logic injected successfully!');
           "
 
+      - name: Bypass Copilot SDK Check
+        run: |
+          node -e "
+          const fs = require('fs');
+          const file = 'build/lib/copilot.ts';
+          if (!fs.existsSync(file)) { throw new Error(file + ' not found'); }
+          let code = fs.readFileSync(file, 'utf8');
+          const target = /export async function prepareBuiltInCopilotRipgrepShim[^{]*\{/;
+          if (!target.test(code)) { throw new Error('prepareBuiltInCopilotRipgrepShim signature not found - VS Code source may have changed'); }
+          code = code.replace(target, 'export async function prepareBuiltInCopilotRipgrepShim() { return;');
+          fs.writeFileSync(file, code);
+          console.log('Bypassed Copilot build step successfully!');
+          "
+
       - name: NPM Install
         env:
           NODE_OPTIONS: "--max_old_space_size=4096"
